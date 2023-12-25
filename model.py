@@ -70,7 +70,9 @@ class Transformer(nn.Module):
       ]
     )
 
-    self.dropout = nn.Dropout(dropout)
+    self.dropout = nn.Dropout(dropout)    
+    self.output_layer = nn.Linear(embed_size, src_vocab_size)
+
 
   def forward(self, x, mask):
     N, seq_length = x.shape
@@ -82,4 +84,5 @@ class Transformer(nn.Module):
     for layer in self.layers:
       out = layer(out, out, out, mask)
 
+    out = self.output_layer(out)
     return out
