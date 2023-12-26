@@ -1,22 +1,4 @@
-"""
-Overview of the architicture (https://github.com/facebookresearch/llama)
-  The `forward` function in the `Transformer` class processes input tokens through a series of transformer blocks to produce output logits for each token. 
-  - Embed tokens: Convert input token indices into embeddings using `tok_embeddings`.
-  - Precompute rotary embeddings: Calculate `freqs_cis` for rotary position embeddings based on the current `start_pos` and sequence length.
-  - Initialize mask: If the sequence length is greater than 1, create a mask to prevent attention to future tokens (causal masking).
-  - Process through layers: Sequentially pass the token embeddings through each `TransformerBlock` in `self.layers`. Each block applies attention and feed-forward operations.
-  - Apply normalization: Normalize the output of the last transformer block using `RMSNorm`.
-  - Generate logits: Project the normalized embeddings to the vocabulary space using a linear layer to obtain logits for each token.
-
-  Each `TransformerBlock` applies the following steps:
-  - Normalize input: Apply layer normalization to the input embeddings.
-  - Apply attention: Pass the normalized embeddings through the `Attention` module, which includes applying rotary embeddings, caching keys and values, computing attention scores, and producing the attention output.
-  - Add residual connection: Combine the attention output with the original input embeddings (residual connection).
-  - Apply feed-forward network: Pass the result through a feed-forward network.
-  - Add another residual connection: Combine the feed-forward output with the input to the feed-forward network (another residual connection).
-
-  The `Attention` module within each `TransformerBlock` applies rotary embeddings to the query and key vectors before computing attention scores. This is done for each attention layer.
-"""
+# based on https://github.com/facebookresearch/llama
 
 import math
 from dataclasses import dataclass
@@ -25,7 +7,6 @@ from typing import Optional, Tuple
 import torch
 import torch.nn.functional as F
 from torch import nn
-
 
 @dataclass
 class ModelArgs:
@@ -41,7 +22,6 @@ class ModelArgs:
   max_batch_size: int = 32
   max_seq_len: int = 2048
 
-
 class RMSNorm(torch.nn.Module):
   def __init__(self, dim: int, eps: float = 1e-6):
     super().__init__()
@@ -55,7 +35,6 @@ class RMSNorm(torch.nn.Module):
     output = self._norm(x.float()).type_as(x)
     return output * self.weight
 
-
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
   freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
   t = torch.arange(end, device=freqs.device)  # type: ignore
@@ -63,14 +42,12 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
   freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
   return freqs_cis
 
-
 def reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor):
   ndim = x.ndim
   assert 0 <= 1 < ndim
   assert freqs_cis.shape == (x.shape[1], x.shape[-1])
   shape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.shape)]
   return freqs_cis.view(*shape)
-
 
 def apply_rotary_emb(
   xq: torch.Tensor,
@@ -84,7 +61,6 @@ def apply_rotary_emb(
   xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(3)
   return xq_out.type_as(xq), xk_out.type_as(xk)
 
-
 def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
   bs, slen, n_kv_heads, head_dim = x.shape
   if n_rep == 1:
@@ -94,7 +70,6 @@ def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
     .expand(bs, slen, n_kv_heads, n_rep, head_dim)
     .reshape(bs, slen, n_kv_heads * n_rep, head_dim)
   )
-
 
 class Attention(nn.Module):
   def __init__(self, args: ModelArgs):
@@ -166,7 +141,6 @@ class Attention(nn.Module):
     output = output.transpose(1, 2).contiguous().view(bsz, seqlen, -1)
     return self.wo(output)
 
-
 class FeedForward(nn.Module):
   def __init__(
     self,
@@ -188,7 +162,6 @@ class FeedForward(nn.Module):
   def forward(self, x):
     return self.w2(F.silu(self.w1(x)) * self.w3(x))
 
-
 class TransformerBlock(nn.Module):
   def __init__(self, layer_id: int, args: ModelArgs):
     super().__init__()
@@ -206,19 +179,26 @@ class TransformerBlock(nn.Module):
     self.attention_norm = RMSNorm(args.dim, eps=args.norm_eps)
     self.ffn_norm = RMSNorm(args.dim, eps=args.norm_eps)
 
-  def forward(
+  def forward(      
     self,
     x: torch.Tensor,
     start_pos: int,
     freqs_cis: torch.Tensor,
     mask: Optional[torch.Tensor],
   ):
+    """
+    Each `TransformerBlock` applies the following steps:
+    - Normalize input: Apply layer normalization to the input embeddings.
+    - Apply attention: Pass the normalized embeddings through the `Attention` module, which includes applying rotary embeddings, caching keys and values, computing attention scores, and producing the attention output.
+    - Add residual connection: Combine the attention output with the original input embeddings (residual connection).
+    - Apply feed-forward network: Pass the result through a feed-forward network.
+    - Add another residual connection: Combine the feed-forward output with the input to the feed-forward network (another residual connection).
+    """
     h = x + self.attention.forward(
       self.attention_norm(x), start_pos, freqs_cis, mask
     )
     out = h + self.feed_forward.forward(self.ffn_norm(h))
     return out
-
 
 class Transformer(nn.Module):
   def __init__(self, params: ModelArgs):
@@ -242,6 +222,15 @@ class Transformer(nn.Module):
 
   @torch.inference_mode()
   def forward(self, tokens: torch.Tensor, start_pos: int):
+    """
+    The `forward` function in the `Transformer` class processes input tokens through a series of transformer blocks to produce output logits for each token. 
+    - Embed tokens: Convert input token indices into embeddings using `tok_embeddings`.
+    - Precompute rotary embeddings: Calculate `freqs_cis` for rotary position embeddings based on the current `start_pos` and sequence length.
+    - Initialize mask: If the sequence length is greater than 1, create a mask to prevent attention to future tokens (causal masking).
+    - Process through layers: Sequentially pass the token embeddings through each `TransformerBlock` in `self.layers`. Each block applies attention and feed-forward operations.
+    - Apply normalization: Normalize the output of the last transformer block using `RMSNorm`.
+    - Generate logits: Project the normalized embeddings to the vocabulary space using a linear layer to obtain logits for each token.    
+    """
     _bsz, seqlen = tokens.shape
     h = self.tok_embeddings(tokens)
     self.freqs_cis = self.freqs_cis.to(h.device)

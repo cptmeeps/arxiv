@@ -1,0 +1,15 @@
+# Clone your GitHub repository
+git clone https://github.com/cptmeeps/llama-concise.git
+
+# Navigate to the repository directory
+cd llama-concise
+
+# Run a container with GPU support and mount the current directory
+docker run --gpus all -it --rm -v $(pwd):/workspace pytorch/pytorch:latest
+
+# Now you are inside the Docker container
+# Install any additional dependencies
+pip install -r requirements.txt
+
+# Run your training script
+python train.py
