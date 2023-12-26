@@ -1,3 +1,22 @@
+"""
+Overview of the architicture (https://github.com/facebookresearch/llama)
+  The `forward` function in the `Transformer` class processes input tokens through a series of transformer blocks to produce output logits for each token. 
+  - Embed tokens: Convert input token indices into embeddings using `tok_embeddings`.
+  - Precompute rotary embeddings: Calculate `freqs_cis` for rotary position embeddings based on the current `start_pos` and sequence length.
+  - Initialize mask: If the sequence length is greater than 1, create a mask to prevent attention to future tokens (causal masking).
+  - Process through layers: Sequentially pass the token embeddings through each `TransformerBlock` in `self.layers`. Each block applies attention and feed-forward operations.
+  - Apply normalization: Normalize the output of the last transformer block using `RMSNorm`.
+  - Generate logits: Project the normalized embeddings to the vocabulary space using a linear layer to obtain logits for each token.
+
+  Each `TransformerBlock` applies the following steps:
+  - Normalize input: Apply layer normalization to the input embeddings.
+  - Apply attention: Pass the normalized embeddings through the `Attention` module, which includes applying rotary embeddings, caching keys and values, computing attention scores, and producing the attention output.
+  - Add residual connection: Combine the attention output with the original input embeddings (residual connection).
+  - Apply feed-forward network: Pass the result through a feed-forward network.
+  - Add another residual connection: Combine the feed-forward output with the input to the feed-forward network (another residual connection).
+
+  The `Attention` module within each `TransformerBlock` applies rotary embeddings to the query and key vectors before computing attention scores. This is done for each attention layer.
+"""
 
 import math
 from dataclasses import dataclass
