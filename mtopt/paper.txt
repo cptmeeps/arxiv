@@ -1,0 +1,170 @@
+MT-Opt: Continuous Multi-Task Robotic Reinforcement Learning at Scale 
+
+Introduction
+
+Today’s deep reinforcement learning (RL) methods, when applied to real-world robotic tasks, provide an effective but ex pensive way of learning skills [36, 2]. While existing methods are effective and able to generalize, they require considerable on-robot training time, as well as extensive engineering effort for setting up each task and ensuring that the robot can attempt the task repeatedly. 
+
+For example, the QT-Opt [36] system can learn vision-based robotic grasping, but it requires over 500, 000 trials collected across multiple robots. While such sample complexity may be reasonable if the robot needs to perform a single task, such as grasping objects from a bin, it becomes costly if we consider the prospect of training a general-purpose robot with a large repertoire of behaviors, where each behavior is learned in isolation, starting from scratch. 
+
+Can we instead amortize the cost of learning this repertoire over multiple skills, where the effort needed to learn whole repertoire is reduced, easier skills serve to facilitate the acquisition of more complex ones, and data requirements, though still high overall, become low for each individual behavior? 
+
+Prior work indicates that multi-task RL can indeed amortize the cost of single-task learning [20, 56, 60, 80, 30]. In particular, insofar as the tasks share common structure, if that structure can be discovered by the learning algorithm, all of the tasks can in principle be learned much more efficiently than learning each of the tasks individually. 
+
+Such shared representations can include basic visual features, as well as more complex concepts, such as learning how to pick up objects. In addition, by collecting experience simultaneously using controllers for a variety of tasks with different difficulty, the easier tasks can serve to “bootstrap” the harder tasks. 
+
+For example, the task of placing three food items on a plate may be difficult to complete if the reward is provided only at the end, but picking up a single food item is considerably easier. By learning these tasks together, the easier task serves to aid with exploration for the harder task. Finally, by enabling the multi-task RL policy to learn shared representations, learning new tasks can become easier over time as the system acquires more skills and learns more widely-useful aspects of the environment. 
+
+However, to realize these benefits for a real-world robotic learning system, we need to overcome a number of major challenges [64, 32, 11, 86], which have so far made it difficult to produce a large-scale demonstration of multi-task image-based RL that effectively accelerates the acquisition of generalizable real-world robotic skills. 
+
+First, multi-task rein forcement learning is known to be exceedingly difficult from the optimization standpoint, and the hypothesized benefits of multi-task learning have proven hard to realize due to these difficulties [64, 87]. 
+
+Second, a real-world multi-task learning framework requires the ability to easily and intuitively define rewards for a large number of tasks. 
+
+Third, while all task specific data could be shared between all the tasks, it has been shown that reusing data from non-correlated tasks can be harmful to the learning process [21]. 
+
+Lastly, in order to receive the benefits from shared, multi-task representation, we need to significantly scale up our algorithms, the number of tasks in the environment, and the robotic systems themselves. 
+
+The main contribution of this paper is a general multi task learning system, which we call MT-Opt, that realizes the hypothesized benefits of multi-task RL in the real world while addressing some of the associated challenges. We further make the following contributions: 
+
+• We address the challenge of providing rewards by cre ating a scalable and intuitive success-classifier-based ap proach that allows to quickly define new tasks and their rewards. 
+
+• We show how our system can quickly acquire new tasks by taking advantage of prior tasks via shared representa tions, novel data-routing strategies, and learned policies. 
+
+• We find that, by learning multiple related tasks simulta neously, not only can we increase the data-efficiency of learning each of them, but also solve more complex tasks than in a single-task setup. 
+
+# RELATED WORK 
+
+Multi-task learning, inspired by the ability of humans to transfer knowledge between different tasks [10], is a promising approach for sharing structure and data between tasks to improve overall efficiency. Multi-task architectures have been successful across multiple domains, including applications in natural language processing [72, 35, 45, 44] and computer vision [12, 48, 65, 54, 88, 71]. In this work, we apply multitask learning concept in a reinforcement learning setting to real robotic tasks – a combination that poses a range of challenges. 
+
+Combining multiple task policies has been explored in reinforcement learning by using gating networks [76, 50], con ditioning policies on tasks [15], mapping tasks to parameters of a policy [13, 38, 82], distilling separate task policies into a shared multi-task policy [40, 77, 62, 53, 27, 5]. In this work, we concentrate on directly learning a shared policy to take advantage of the shared structure which as we find in our experiments significantly improves the training efficiency. Advantages of multi-task learning for visual representations has been explored in [57]. 
+
+Similar to our method, Pinto and Gupta [56] use a shared neural network architecture for multi task learning with shared visual layers and separate task specific layers that are trained with task-specific losses. In contrast, in our work, we concentrate on sparse-reward tasks with a common loss structure within a Q-learning framework. Several works explore how to mitigate multi-task interference and conflicting objectives when optimizing a single model for multiple tasks [31, 85]. In our experiments, we find that better data routing and grouping of tasks training data helps with not only better mitigating conflicting objectives but also improving learning efficiency through data reuse. 
+
+
+Learning complex and composite skills has been addressed through hierarchical reinforcement learning with options [75, 7, 14], combining multiple sub-tasks [6, 16, 49, 26, 69, 89], reusing samples between tasks [39], relabeling experience in hindsight [3], introducing demonstrations [58, 81, 29, 41, 70, 66, 67]. 
+
+A range of works employ various forms of au tonomous supervision to learn diverse skills, e.g. by scaling up data collection [55], sampling suitable tasks [68] or goals [51] to practice, learning a task embedding space amenable to sampling [30], or learning a dynamics model and using model predictive control to achieve goals [23, 19, 42, 73]. Riedmiller et al. [60] learn sparse-reward tasks by solving easier auxiliary tasks and reusing that experience for off-line learning of more complex tasks. 
+
+Their SAC-X framework shares data across tasks to learn and schedule many tasks, which eventually facil itate the complex task. In Cabi et al. [9], previously collected experience is relabeled with new reward functions in order to solve new tasks using batch RL without re-collecting the data. 
+
+In our work, we similarly design techniques for reusing experience between related tasks, which helps us to solve long horizon problems and learn new tasks by training new success detectors without re-collecting the data. We expand on this direction by providing an in-depth analysis of various data sharing techniques and applying these techniques to a number of complex tasks and large-scale data collection on real robots. 
+
+Multi-task learning can also be posed as a form of meta learning, as we aim to share the knowledge between tasks to accelerate training. Meta-learning has been both combined with imitation learning [18, 25, 83, 34, 8, 52, 84] and rein forcement learning through context space learning [79, 17, 47, 59, 90] and gradient-based optimization [24, 61, 33, 28, 46]. Finally, continual acquisition of skills can be seen as a form of lifelong or continual learning [78]. 
+
+Multiple works address lifelong reinforcement learning through specifically designed model structures [63, 22], constraints on model parameters [43] and generative memory architectures [37]. We design our framework such that any amount of offline data can be shared between tasks and new tasks can be continuously added through new success detectors without re-collecting the data, which allows continuous acquisition of new skills. 
+
+III. SYSTEM OVERVIEW 
+
+We devise a distributed, off-policy multi process is graded by a multi-task visual success detector (SD) that determines which tasks were accomplished successfully and assigns a sparse reward 0 or 1 for each task. At the next step, the system decides whether another task should be attempted or if the environment should be reset. 
+
+The above described setup can scale to multiple robots, where each robot concurrently collects data for a different, randomly-selected task. The generated episodes are used as offline data for training future policies (Fig. 2D) and are available to improve success detectors. 
+
+We develop multiple strategies that allow our RL algorithm to take advantage of the multi-task training setting. First, we use a single, multi-task deep neural network to learn a policy for all the tasks simultaneously, which enables parameter sharing between tasks. Second, we devise data management strategies that share and re-balance data across certain tasks. Third, since all tasks share data and parameters, we use some tasks as exploration policies for others, which aids in exploration. 
+
+In order to cope with a large, multi-task dataset, we build on many features of the distributed off-policy RL setup from QT-Opt [36], and extend it to leverage the multi-task nature of our data. In the following sections, we describe the details of different parts of this large scale, image-based distributed multi-task reinforcement learning based system. 
+
+# MT-OPT: A SCALABLE MULTI-TASK RL SYSTEM 
+
+In this section, we describe our multi-task reinforcement learning method, MT-Opt, which amortizes the cost of learning multiple skills via parameter and data sharing. 
+
+MT-Opt overview. A) The user defines a success detector for tasks through examples of desired outcomes, and relabeling outcomes of prior episodes. B) Utilizing the success detector and the MT-Opt policy, new episodes are collected for multiple tasks. C) Offline episodes enter the data-sharing pipeline that expands and re-balances the data used to train the MT-Opt policy, while optionally more on-policy data is being collected, particularly for new tasks. This is an iterative process, which results in additional experiences that can be leveraged to define new tasks and train future RL policies. 
+
+## Multi-Task Reinforcement Learning Algorithm 
+
+We first introduce notation and RL fundamentals. We denote the multi-task RL policy as π(a|s, Ti), where a ∈ A denotes the action, which in our case includes the position and the orientation of a robot arm as well as gripper commands, s ∈ S denotes the state, which corresponds to images from the robot’s cameras, and Ti denotes an encoding of the ith task drawn from a categorical task distribution Ti ∼ p(T ), which has n possible categories, each corresponding to a different task. 
+
+At each time step, the policy selects an action a given the current state s and the current task Tithat is set at the beginning of the episode, and receives a task-dependent reward ri(a, s, Ti). As in a standard Markov decision process (MDP), the environment then transitions to new state s0. The goal of the multi-task RL policy is to maximize the expected sum of rewards for all tasks drawn from the distribution p(T ). The episode finishes when the policy selects a TERMINATE action or reaches a pre-defined maximum step limit. 
+
+Our goal is to learn an optimal multi-task Q-Function Qθ(s, a, Ti) with parameters θ, that estimates the expected sum of rewards that will be achieved after taking the action a in the current state s for the task Ti. In particular, we build on the single-task QT-Opt algorithm [36], which itself is a variant of Q-learning [74], and learns a single-task optimal Q-Function by minimizing the Bellman error.
+
+To address these issues, we devise a new task impersonation where (s(i), a(i), s0(i)) are transitions generated by tasks Ti. While this basic multi-task Q-learning system can in prin ciple acquire diverse tasks, with each task learning from the data corresponding to that task, this approach does not take the full advantage of the multi-task aspects of the system, which we introduce next. 
+
+B. Task Impersonation and Data Rebalancing One of the advantages of using an off-policy RL algorithm such as Q-learning is that collected experience can be used to update the policy for other tasks, not just the task for which it was originally collected. This section describes how we ef fectively train with multi-task data through task impersonation and data re-balancing, as summarized in Fig. 3. We leverage such experience sharing at the whole episode level rather than at the individual transition level. 
+
+The goal is to use all transitions of an episode e(i) generated by task Tito aid in training a policy for a set of kitasks T{ki}. We refer to this process as task impersonation (see Algorithm 1), where the impersonation function fI transforms episode data collected for one task into a set of episodes that can be used to also train other tasks, i.e.: e{ki} = fI (e(i)). 
+
+Note that in general case {ki} is a subset of all tasks {n}, and it depends on the original task Tithat the episode e(i) was collected for. We introduce this term to emphasize the difference with the hindsight relabelling [4] that is commonly used to generate additional successes in a goal-conditioned setting, whereas task-impersonation generates both successes and failures in a task-conditioned setup. 
+
+First, we discuss two base choices for the impersonation function fI , then we introduce a more principled solution. Consider an identity impersonation function fIorig (e(i)) = e(i), where no task impersonation takes place, i.e. an episode e(i) generated by task Tiis used to train the policy exclusively for that task. This baseline impersonation function does not take advantage of the reusable nature of the multi-task data. 
+
+At the other end of the data-sharing spectrum is fIall = e{n}, where each task shares data with all remaining n − 1 tasks resulting in maximal data sharing. While fIorig fails to leverage strategy fIskill that makes use of more fine-grained similar ities between tasks. 
+
+We refer to it as a skill-based task impersonation strategy, where we overload the term “skill” as a set of tasks that share semantics and dynamics, yet can start from different initial conditions or operate on different objects. For example tasks such as place-object-on-plate and place object-in-bowl belong to the same skill. 
+
+Our impersonation function fIskill allows us to impersonate an episode e(i) only as the tasks belonging to the same skill as Ti. This strategy allows us to keep the benefits of data sharing via impersonation, while limiting the “dilution” issue. While in this work we manually decide on the task-skill grouping, this can be further extended by learning the impersonation function itself, which we leave as an avenue for future work. In our experiments, we conduct ablation studies comparing fIskill (ours) with other task impersonation strategies. 
+
+While training, due to the design of our task impersonation mechanism, as well as the variability in difficulty between tasks, the resulting training data stream often becomes highly imbalanced both in terms of the proportion of the dataset belonging to each task, and in terms of the relative frequencies of successful and unsuccessful episodes for each task, see Fig. 3B. We further highlight the imbalancing challenge in the Appendix, where Fig. 12 shows how much “extra” data is created per task thanks to the impersonation algorithm. 
+
+In practice, this imbalance can severely hinder learning progress. We found the performance of our system is improved substan tially by further re-balancing each batch both between tasks, such that the relative proportion of training data for each task is equal, and within each task, such that the relative proportion of successful and unsuccessful examples is kept constant. 
+Task impersonation and data re-balancing functions work in sequence and they influence the final composition of the train ing batch. While this process might result in some transitions being drastically oversampled compared to others (if data for that task is scarce), the success and task re-balancing has a big positive impact on the task performance, which we ablate in our experiments.
+
+V. REWARDS VIA MULTI-TASK SUCCESS DETECTORS 
+
+In this work, we aim to learn a discrete set of tasks that can be evaluated based only on the final image of an RL episode. This sparse-reward assumption allows us to train a neural network-based success detector model (SD), which given a final image, infers a probability of a task being successful. 
+
+Similarly to policy learning, we take advantage of the multi task aspect of this problem and train a single multi-task success detector neural network that is conditioned on the task ID. In fact, we use supervised learning to train a similar neural network architecture model (excluding the inputs responsible for action representation) as for the MT-Opt multi-task policy, which we describe in more detail in the Appendix X-A. 
+
+To generate training data for the SD, we develop an intuitive interface with which a non-technical user can quickly generate positive examples of outcomes that represent success for a particular task. These examples are not demonstrations – just examples of what successful completion (i.e., the final state) looks like. 
+
+The user also shows negative examples of near misses, or outcomes that are visually similar to the positive samples, but are still failures, such as an object being placed next to a plate rather than on top of it. We present example frames of such training data collection process in Fig. 4. 
+
+While this interface allows us to train the initial version of the multi-task SD, additional training data might be required as the robot starts executing that task and runs into states where the SD is not accurate. Such out of distribution images might be caused by various real-world factors such as differ ent lighting conditions, changing in background surroundings and novel states which the robot discovers. 
+
+We continue to manually label such images and incrementally retrain SD to obtain the most up-to-date SD. In result, we label ≈ 5, 000 images per task and provide more details on the training data statistics in the Appendix, Fig. 14. 
+
+
+# CONTINUOUS DATA COLLECTION 
+
+In this section, we present the data collection strategy that we utilize to simultaneously collect data for multiple distinct tasks across multiple robots. 
+
+Our main observation w.r.t. the multi-task data collection process is that we can use solutions to easier tasks to effectively bootstrap learning of more complex tasks. This is an important benefit of our multi task system, where an average MT-Opt policy for simple tasks might occasionally yield episodes successful for harder tasks. Over time, this allows us to start training an MT-Opt policy now for the harder tasks, and consequently, to collect better data for those tasks. 
+
+To kick-start this process and bootstrap our two simplest tasks, we use two crude scripted policies for picking and placing (see Sec. X-B for details) following prior work [36]. In addition, in order to simplify the exploration problem for longer-horizon tasks, we also allow the individual tasks to be ordered sequentially, where one task is executed after another. 
+
+As such, our multi-task dataset grows over time w.r.t. the amount of per-task data as well as percentage of successful episodes for all the tasks. 
+
+Importantly, this fluid data collection process results in an imbalanced dataset, as shown on Fig. 5. Our data imperson ation and re-balancing methods described above address this imbalance by efficiently expanding and normalizing data. 
+
+# Learning New Tasks with MT-Opt 
+
+MT-Opt can learn broad skills, and then further specialize them to harder but more specific tasks, such as lift-sausage. This retroactive relabelling of prior data is one way to learn new tasks including lifting objects of other properties such as size, location, color or shape. 
+
+In addition, MT-Opt can learn new tasks via proactive adaptation of known tasks, even ones that are visually and behaviorally different than those in the initial training set. To demonstrate this, we perform a fine-tuning experiment, bootstrapping from the MT-Opt 12-task model described in Sec. VII-B. In particular, we use the MT-Opt policy to collect data for a previously unseen tasks of lift-cloth and cover-objecttasks (see Fig. 8 bottom row for an example episode). Unlike the lift-sausage tasks from the above section, prior to starting collection of these new tasks, no episodes in our offline dataset can be relabelled as successes for these two new tasks. 
+
+We follow the continuous data collection process described in Sec. VI: we define and train the success detector for the new tasks, collect initial data using our lift-any and a place-any policies, and fine-tune a 14-task MT-Opt model that includes all prior as well as the newly defined tasks. While the new tasks are visually and semantically different, in practice the above mentioned policies give reasonable success rate necessary to start the fine-tuning. We switch to running the new policies on the robots once they are at parity with the lift any and place-any policies. 
+
+After 11K pick-cloth attempts and 3K cover-object attempts (requiring < 1 day of data collection on 7 robots), we obtain an extended 14-task MT policy that performs cloth picking at 70% success and object covering at 44% success. The policy trained only for these two tasks, without support of our offline dataset, yields performance of 33% and 5% respectively, confirming the hypothesis that MT Opt method is beneficial even if the target tasks are sufficiently different, and the target data is scarce. 
+
+By collecting additional 10K pick-cloth episodes and 6K cover-object episodes, we further increase the performance of 14-task MT-Opt to 92% and 79%, for cloth picking and object covering respectively. 
+
+We perform this fine-tuning procedure with other novel tasks such as previously unseen transparent bottle grasping, which reaches a performance of 60% after less than 4 days of data collection. Note that in this experiment, we additionally take advantage of the pre-trained MT-Opt policy for collecting the data for the new task. Similarly to other ablations, collecting data using the two-task policy would yield lower success rate per task, leading to larger difference in performance.
+
+# NN Arch
+
+We model the Q-function for multiple tasks as a large deep neural network whose architecture is shown in Fig. 9. This network resembles one from [36]. The network takes the monocular RGB image part of the state s as input, and processes it with 7 convolutional layers. The actions a and additional state features (gstatus, gheight) and task ID Ti are transformed with fully-connected layers, then merged with visual features by broadcasted element-wise addition. 
+
+After fusing state and action representations, the Q-value Qθ(s, a) is modeled by 9 more convolutional layers followed by two fully connected layers. In our system the robot can execute multiple tasks from in the given environment. Hence the input image is not sufficient to deduce which task the robot is commanded to execute. To address that, we feed one-hot vector representing task ID into the network to condition Q-Function to learn task specific control. 
+
+In addition to feeding task ID we have experimented with multi-headed architecture, where n separate heads each having 3 fully connected layers representing n tasks were formed at the output of the network. Fig.10 shows that performance of the system with the multi-headed Q-function architecture is worse almost for all tasks. We hypothesize that dedicated per task heads “over-compartmentalizes” task policy, making it harder to leverage shared cross-task representations. 
+
+B. Description of Scripted Policies 
+
+As discussed in SectionVI we use two crude scripted policies to bootstrap easy generic tasks. 
+
+Scripted Picking Policy: To create successful picking episodes, the arm would begin the episode in a random location above the right bin containing objects. Executing a crude, scripted policy, the arm is programmed to move down to the bottom of the bin, close the gripper, and lift. While the success rate of this policy is very low (≈ 10%), especially with the additional random noise injected into actions, this is enough to bootstrap our learning process.
+
+Scripted Placing Policy: The scripted policy programmed to perform placing would move the arm to a random location above the left bin that contains a fixture. The arm is then programmed to descend, open the gripper to release the object and retract. This crude policy yields a success rate of (47%) at the task of placing on a fixture (plate), as the initial fixture is rather large. Data collected by such a simplistic policy is sufficient to bootstrap learning. 
+
+C. fIskill impersonation strategy details 
+
+Task impersonation is an important component of the MT Opt method. Given an episode and a task definition, the SD classifies if that episode is an example of a successful task execution according to that particular goal definition. Impor tantly, both the success and the failure examples are efficiently utilized by our algorithm. 
+
+The success example determines what the task is, while the failure example determines what the task is not (thus still implicitly providing the boundary of the task), even if it’s an example of a success for some other task. Fig.12 shows by how much the per task data is expanded using the fIskill impersonation function. 
+
+System overview: Task episodes from disk are continuously loaded by LogReplay job into task replay buffers. LogReplay process assigns binary reward signal to episodes using available Success Detectors and impersonates episodes using fIskill (or other strategy). Impersonated episodes are compartmentalized into dedicated per task buffers, further split into successful and failure groups. 
+
+Bellman Update process samples tasks using re-balancing strategy to ensure per task training data balancing and computes Q-targets for individual transitions, which are placed into train buffer. These transitions (s, a, Ti) are sampled by the train workers to update the model weights. The robot fleet and Bellman Update jobs are reloading the most up to date model weights frequently.
+
+DETECTOR 
+
+Training a visual success detector is an iterative process, as a new task initially has no data to train from. We have two strategies to efficiently create an initial SD training dataset for a new task. 1) We collect 5Hz videos from 3 different camera angles where every frame of the video a human is demonstrating task success, and then a short video demonstrating failure. Note that the user shows the desired and non-desired outcome of the task, not to be confused with demonstrations of how the task needs to be done. The user would then change the lighting, switch out the objects and background, and then collect another pair of example videos (see Fig. 4 for example one video where there is always something on a plate being moved around paired with another video where there is never anything on a plate). The intention here is to de-correlate spurious parts of the scene from task-specifics. 
