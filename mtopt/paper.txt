@@ -166,3 +166,7 @@ Bellman Update process samples tasks using re-balancing strategy to ensure per t
 # DETECTOR 
 
 Training a visual success detector is an iterative process, as a new task initially has no data to train from. We have two strategies to efficiently create an initial SD training dataset for a new task. 1) We collect 5Hz videos from 3 different camera angles where every frame of the video a human is demonstrating task success, and then a short video demonstrating failure. Note that the user shows the desired and non-desired outcome of the task, not to be confused with demonstrations of how the task needs to be done. The user would then change the lighting, switch out the objects and background, and then collect another pair of example videos (see Fig. 4 for example one video where there is always something on a plate being moved around paired with another video where there is never anything on a plate). The intention here is to de-correlate spurious parts of the scene from task-specifics. 
+
+Fig. 9
+
+The architecture of MT-OPT Q-function. The input image is processsed by a stack of convolutional layers. Action vector, state vector and one-hot vector Ti representing the task of interest are processed by several fully connected layers, tiled over the width and height dimension of the convolutional map, and added to it. The resulting convolutionallayers and fully connected layers. The output is gated through a sigmoid such that the Q-values are always in the range [0, 1]
